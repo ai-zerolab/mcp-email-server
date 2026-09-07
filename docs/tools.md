@@ -610,8 +610,11 @@ static for the lifetime of a server process. `send_email`,
 `list_allowed_recipients`, `list_allowed_senders`, and `download_attachment` are
 always advertised. Account existence, enabled state, SMTP capability, and
 current policies are enforced when each tool is called. The allowlist tools have
-distinct empty semantics: an empty recipient list disables sending, while an
-empty sender list does not restrict reading. Each list is limited to 1,000
+distinct empty semantics: an empty recipient list denies `send_email`,
+`forward_email`, and `save_to_mailbox`, while an empty sender list does not
+restrict reading. Recipient denial errors direct users to configure exact
+allowed addresses through the user-operated CLI/UI; this does not require
+sharing credentials with the agent. Each list is limited to 1,000
 entries, and the complete effective-configuration snapshot
 is canonically serialized against the shared 8 MiB ceiling before either policy
 result is returned; oversized authority data fails with `limit_exceeded`.

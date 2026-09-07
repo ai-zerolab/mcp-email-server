@@ -642,14 +642,15 @@ def _validate_optional_header(name: str, value: str | None) -> None:
 
 
 def _recipient_policy_allows(recipient: str, allowed: tuple[str, ...]) -> bool:
-    # Re-parse the validated single-address value so direct application callers
-    # receive the same exact allowlist decision as the MCP compatibility gate.
+    """Require explicit recipient authority; an empty allowlist permits no address."""
+    # Re-parse the validated single-address value for exact normalized matching
+    # shared by MCP and direct application callers.
     from email.utils import getaddresses
 
     from mcp_email_server.config import normalize_address
 
     if not allowed:
-        return True
+        return False
     addresses = [normalize_address(address) for _, address in getaddresses([recipient]) if address]
     allowed_set = set(allowed)
     return bool(addresses) and all(address in allowed_set for address in addresses)

@@ -47,7 +47,13 @@ def _account(**changes: object) -> MutationAccountSnapshot:
         account_name="primary",
         mode="managed",
         allowed_senders=(),
-        allowed_recipients=(),
+        allowed_recipients=(
+            "recipient@example.test",
+            "accepted@example.test",
+            "rejected@example.test",
+            "secret@example.test",
+            "copied@example.test",
+        ),
         report_blocked_mutations=False,
         can_send=True,
     )
@@ -81,6 +87,85 @@ def _services(
         factory,
         selected_projection,
     )
+
+
+@pytest.mark.parametrize(
+    ("recipient", "allowed", "expected"),
+    [
+        ("recipient@example.test", (), False),
+        ("recipient@example.test", ("recipient@example.test",), True),
+        ("Recipient <RECIPIENT@Example.Test>", ("recipient@example.test",), True),
+        ("other@example.test", ("recipient@example.test",), False),
+        ("recipient@example.test", ("*",), False),
+    ],
+)
+def test_recipient_policy_requires_explicit_exact_match(
+    recipient: str, allowed: tuple[str, ...], expected: bool
+) -> None:
+    assert mutations_module._recipient_policy_allows(recipient, allowed) is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["managed", "legacy"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        SendCommand("primary", ("recipient@example.test",), "Subject", "body"),
+        SaveToMailboxCommand("primary", ("recipient@example.test",), "Subject", "body"),
+        ForwardCommand("primary", ("recipient@example.test",), "", "", source_email_id="42"),
+    ],
+    ids=["send", "save", "forward"],
+)
+@pytest.mark.parametrize("stage", ["resolve", "open"])
+async def test_empty_recipient_policy_denies_before_provider_effect(
+    mode: str, command: SendCommand | SaveToMailboxCommand | ForwardCommand, stage: str
+) -> None:
+    account = _account(mode=mode, allowed_recipients=() if stage == "resolve" else ("recipient@example.test",))
+    provider = MagicMock()
+    services, _, factory, projection = _services(account=account, provider=provider)
+    factory.open.return_value = MutationProviderAccess(replace(account, allowed_recipients=()), provider)
+    if isinstance(command, ForwardCommand):
+        operation = services.forward.execute(command)
+    elif isinstance(command, SaveToMailboxCommand):
+        operation = services.save_to_mailbox.execute(command)
+    else:
+        operation = services.send.execute(command)
+
+    with pytest.raises(RecipientPolicyDeniedError):
+        await operation
+
+    assert factory.open.call_count == (0 if stage == "resolve" else 1)
+    assert provider.mock_calls == []
+    projection.invalidate.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["recipients", "cc", "bcc"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        SendCommand("primary", ("recipient@example.test",), "Subject", "body"),
+        SaveToMailboxCommand("primary", ("recipient@example.test",), "Subject", "body"),
+        ForwardCommand("primary", ("recipient@example.test",), "", "", source_email_id="42"),
+    ],
+    ids=["send", "save", "forward"],
+)
+async def test_recipient_policy_checks_every_address_before_provider_access(
+    field: str, command: SendCommand | SaveToMailboxCommand | ForwardCommand
+) -> None:
+    services, _, factory, _ = _services(account=_account(allowed_recipients=("recipient@example.test",)))
+    command = replace(command, **{field: ("recipient@example.test", "blocked@example.test")})
+    if isinstance(command, ForwardCommand):
+        operation = services.forward.execute(command)
+    elif isinstance(command, SaveToMailboxCommand):
+        operation = services.save_to_mailbox.execute(command)
+    else:
+        operation = services.send.execute(command)
+
+    with pytest.raises(RecipientPolicyDeniedError):
+        await operation
+
+    factory.open.assert_not_called()
 
 
 def _tag_registry() -> ImapKeywordRegistry:
@@ -1028,7 +1113,9 @@ async def test_forward_recipient_policy_denial_fails_before_provider_access() ->
 @pytest.mark.asyncio
 async def test_forward_recipient_policy_denial_after_open_fails_before_retrieval() -> None:
     provider = _forward_provider()
-    services, _, factory, _ = _services(provider=provider)
+    services, _, factory, _ = _services(
+        account=_account(allowed_recipients=("blocked@example.test",)), provider=provider
+    )
     factory.open.return_value = MutationProviderAccess(
         _account(allowed_recipients=("allowed@example.test",)),
         provider,
@@ -1158,12 +1245,17 @@ async def test_forward_send_capability_loss_after_open_fails_before_retrieval() 
 
 
 @pytest.mark.asyncio
-async def test_forward_recipient_policy_denial_before_delivery_fails_after_retrieval() -> None:
+@pytest.mark.parametrize("allowed", [(), ("allowed@example.test",)])
+async def test_forward_recipient_policy_denial_before_delivery_fails_after_retrieval(
+    allowed: tuple[str, ...],
+) -> None:
     provider = _forward_provider()
-    services, _, factory, _ = _services(provider=provider)
+    services, _, factory, _ = _services(
+        account=_account(allowed_recipients=("blocked@example.test",)), provider=provider
+    )
     factory.open.side_effect = [
         factory.open.return_value,
-        MutationProviderAccess(_account(allowed_recipients=("allowed@example.test",)), provider),
+        MutationProviderAccess(_account(allowed_recipients=allowed), provider),
     ]
 
     with pytest.raises(RecipientPolicyDeniedError):

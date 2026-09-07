@@ -272,6 +272,12 @@ UI represents each recipient or sender pattern as an individual add/edit/remove
 item rather than a comma-separated field. Every update requires the revision
 shown by `config policy`.
 
+An empty recipient policy also denies `save_to_mailbox`; it is not just an SMTP
+switch. This applies in managed and legacy mode, including an omitted legacy
+setting or an explicit empty environment override. Older implementations
+incorrectly treated an empty list as unrestricted; see the
+[recipient policy upgrade note](security.md#recipient-policy-upgrade-note).
+
 Endpoint ports must be between 1 and 65535, and implicit TLS cannot be combined
 with STARTTLS. `account add` checks the selected catalog and these non-secret
 endpoint rules before prompting or reading a credential; application services

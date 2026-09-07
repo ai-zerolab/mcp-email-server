@@ -803,7 +803,7 @@
         },
         {
             "name": "list_allowed_recipients",
-            "description": "List the configured recipient allowlist — the addresses that send_email and forward_email are permitted to send to and save_to_mailbox is permitted to address. Returns an empty list when unrestricted.",
+            "description": "List the configured recipient allowlist — the addresses that send_email and forward_email are permitted to send to and save_to_mailbox is permitted to address. An empty list denies all recipients for these operations; configure allowed recipients through the user-operated CLI/UI.",
             "inputSchema": {
                 "properties": {},
                 "title": "list_allowed_recipientsArguments",
