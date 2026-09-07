@@ -4,6 +4,7 @@ import base64
 import contextlib
 import imaplib
 import importlib.metadata
+import json
 import os
 import re
 import smtplib
@@ -277,6 +278,33 @@ async def _call_tool(session: ClientSession, name: str, arguments: dict[str, Any
     return result.structuredContent
 
 
+async def _assert_empty_recipient_policy_blocks_compose(
+    session: ClientSession, account_name: str, source_uid: str
+) -> None:
+    assert (await _call_tool(session, "list_allowed_recipients", {}))["result"] == []
+    counts_before = (
+        _message_count(BOB, "INBOX"),
+        _message_count(ALICE, "Drafts"),
+        _message_count(ALICE, "INBOX"),
+    )
+    for tool_name, arguments in (
+        ("send_email", {"subject": "Denied send", "body": "Synthetic body"}),
+        ("forward_email", {"email_id": source_uid}),
+        ("save_to_mailbox", {"subject": "Denied draft", "body": "Synthetic body"}),
+    ):
+        result = await session.call_tool(
+            tool_name, arguments={"account_name": account_name, "recipients": [BOB[0]], **arguments}
+        )
+        assert result.isError is True
+        assert "An empty allowlist denies all recipients" in _text_content(result)
+        assert "CLI/UI" in _text_content(result)
+    assert (
+        _message_count(BOB, "INBOX"),
+        _message_count(ALICE, "Drafts"),
+        _message_count(ALICE, "INBOX"),
+    ) == counts_before
+
+
 async def _metadata_for_subject_in_mailbox(
     session: ClientSession, account_name: str, mailbox: str, subject: str
 ) -> dict[str, Any]:
@@ -307,6 +335,22 @@ def _run_cli(console_script: Path, env: dict[str, str], arguments: list[str], *,
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
     return completed.stdout
+
+
+def _update_recipient_policy(console_script: Path, env: dict[str, str], recipients: str) -> None:
+    policy = json.loads(_run_cli(console_script, env, ["config", "policy", "--json"]))["data"]
+    _run_cli(
+        console_script,
+        env,
+        [
+            "config",
+            "update-policy",
+            "--expected-revision",
+            str(policy["revision"]),
+            "--allowed-recipients",
+            recipients,
+        ],
+    )
 
 
 @pytest.mark.asyncio
@@ -409,6 +453,26 @@ async def test_managed_cli_setup_restart_and_stdio_list_mailboxes_against_greenm
                 assert connection.execute("SELECT completeness FROM index_coverage").fetchone()[0] == "COMPLETE"
 
             managed_uid = metadata["emails"][0]["email_id"]
+            await _assert_empty_recipient_policy_blocks_compose(session, "alice-managed", managed_uid)
+            # Policy changes must be visible in this same stdio session: default
+            # denial -> explicit permission -> clearing the last recipient.
+            _update_recipient_policy(console_script, server_env, BOB[0])
+            assert (await _call_tool(session, "list_allowed_recipients", {}))["result"] == [BOB[0]]
+            allowed_subject = f"managed-allowed-{uuid.uuid4().hex}"
+            await _call_tool(
+                session,
+                "send_email",
+                {
+                    "account_name": "alice-managed",
+                    "recipients": [BOB[0]],
+                    "subject": allowed_subject,
+                    "body": "Explicitly allowed synthetic message",
+                },
+            )
+            _wait_for_message(BOB, "INBOX", allowed_subject)
+            _update_recipient_policy(console_script, server_env, "")
+            await _assert_empty_recipient_policy_blocks_compose(session, "alice-managed", managed_uid)
+            _update_recipient_policy(console_script, server_env, BOB[0])
             mark = await _call_tool(
                 session,
                 "mark_emails_as_read",
@@ -884,6 +948,45 @@ async def test_metadata_index_paging_fallback_and_restart_reuse_against_greenmai
     restart_observed_at, restart_page = await exercise_session(verify_filters=False)
     assert restart_observed_at == first_observed_at
     assert restart_page == first_page
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy_source", ["unset", "empty-toml", "empty-env"])
+async def test_legacy_empty_recipient_policy_against_greenmail(tmp_path: Path, policy_source: str) -> None:
+    _wait_until_ready()
+    _ensure_empty_mailboxes(ALICE, ["INBOX", "Drafts"])
+    _ensure_empty_mailboxes(BOB, ["INBOX"])
+    subject = f"denied-forward-source-{uuid.uuid4().hex}"
+    _seed_message_as(BOB, ALICE[0], subject, "Synthetic forward source")
+    source = _wait_for_message(ALICE, "INBOX", subject)
+    config = CONFIG_TEMPLATE
+    if policy_source == "unset":
+        config = config.replace('allowed_recipients = ["bob@example.test"]\n', "")
+    elif policy_source == "empty-toml":
+        config = config.replace('allowed_recipients = ["bob@example.test"]', "allowed_recipients = []")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(config)
+    config_path.chmod(0o600)
+    server_env = {key: value for key, value in os.environ.items() if not key.startswith("MCP_EMAIL_SERVER_")}
+    server_env.update({
+        "MCP_EMAIL_SERVER_CONFIG_PATH": str(config_path),
+        "MCP_EMAIL_SERVER_LOG_LEVEL": "WARNING",
+    })
+    if policy_source == "empty-env":
+        server_env["MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS"] = ""
+    server = StdioServerParameters(
+        command=str(Path(sys.executable).with_name("mcp-email-server")),
+        args=["stdio"],
+        env=server_env,
+        cwd=Path.cwd(),
+    )
+    async with stdio_client(server) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream, read_timeout_seconds=timedelta(seconds=15)) as session:
+            await session.initialize()
+            metadata = await _metadata_for_subject(session, "alice", subject)
+            assert metadata["email_id"] == source.uid
+            await _assert_empty_recipient_policy_blocks_compose(session, "alice", source.uid)
+            assert r"\Seen" not in _wait_for_message(ALICE, "INBOX", subject).flags
 
 
 @pytest.mark.asyncio

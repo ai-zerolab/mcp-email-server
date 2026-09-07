@@ -95,6 +95,12 @@ satisfied by mocks.
 
 - MCP: complete catalog snapshot, application-version identity, reviewed tool
   annotations, text/structured discovery equivalence, and raw protocol behavior.
+  Recipient policy evidence links `tests/test_mutation_application.py`,
+  `tests/test_mcp_tools.py`, and `tests/e2e/test_stdio_greenmail.py` to the
+  [configuration policy contract](04-configuration-and-managed-catalog.md):
+  empty-policy denial before provider effects, To/CC/BCC checks, current-policy
+  revalidation, discovery wording, and managed/legacy stdio behavior. Published
+  upgrade guidance lives in `docs/security.md` and `docs/troubleshooting.md`.
 - CLI: command help/options, confirmations, user-controlled stdin secrets, one
   parsed schema-version-1 JSON envelope for every finite command, typed errors
   with fixed safe messages, post-operation revisions/restart state,

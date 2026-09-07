@@ -526,8 +526,8 @@ async def get_emails_content(
 @mcp.tool(
     description=(
         "List the configured recipient allowlist — the addresses that send_email and forward_email are "
-        "permitted to send to and save_to_mailbox is permitted to address. Returns an empty list when "
-        "unrestricted."
+        "permitted to send to and save_to_mailbox is permitted to address. An empty list denies all "
+        "recipients for these operations; configure allowed recipients through the user-operated CLI/UI."
     ),
     annotations=_READ_ONLY_LOCAL,
 )
@@ -643,7 +643,10 @@ async def send_email(
             )
         )
     except RecipientPolicyDeniedError as exc:
-        raise ValueError("Recipient(s) not in allowlist") from exc
+        raise ValueError(
+            "Recipient(s) not in allowlist; configure allowed recipients through the user-operated CLI/UI "
+            "before sending or saving. An empty allowlist denies all recipients."
+        ) from exc
     if _send_outcome_is_clean(outcome):
         recipient_str = ", ".join(recipients)
         attachment_info = f" with {len(attachments)} attachment(s)" if attachments else ""
@@ -725,7 +728,10 @@ async def forward_email(
             )
         )
     except RecipientPolicyDeniedError as exc:
-        raise ValueError("Recipient(s) not in allowlist") from exc
+        raise ValueError(
+            "Recipient(s) not in allowlist; configure allowed recipients through the user-operated CLI/UI "
+            "before sending or saving. An empty allowlist denies all recipients."
+        ) from exc
     if _send_outcome_is_clean(outcome):
         return f"Email forwarded successfully to {', '.join(recipients)}"
     return f"Email forward [{_tagged_send_result(outcome)}]"
@@ -829,7 +835,10 @@ async def save_to_mailbox(
             )
         )
     except RecipientPolicyDeniedError as exc:
-        raise ValueError("Recipient(s) not in allowlist") from exc
+        raise ValueError(
+            "Recipient(s) not in allowlist; configure allowed recipients through the user-operated CLI/UI "
+            "before sending or saving. An empty allowlist denies all recipients."
+        ) from exc
     if outcome.status == "succeeded" and not outcome.reconciliation_needed:
         email_id = outcome.uid or "unknown"
         return f"Email saved to '{mailbox}' successfully. Message-Id: {outcome.message_id}, email_id: {email_id}"

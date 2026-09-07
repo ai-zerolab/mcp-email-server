@@ -518,7 +518,23 @@ understands display-name forms such as `Alice <alice@example.com>`.
 `list_allowed_recipients` is always visible in the static MCP tool catalog. An
 empty result means sending is disabled; it never means unrestricted sending.
 The Web UI edits recipients as individual add/edit/remove items and states this
-empty behavior explicitly.
+empty behavior explicitly. The restriction applies equally in managed and
+legacy mode and covers To, CC, and BCC. An initially empty policy is rejected
+before a provider is opened, including before a forward source is read.
+Clearing the last recipient does not enable unrestricted sending. This policy
+is not a read-only mode: other mailbox mutations remain available.
+
+### Recipient policy upgrade note
+
+Earlier implementations incorrectly permitted any recipient when this list was
+empty, despite the documented restriction and UI guidance. The fix for
+[#247](https://github.com/Wh1isper/mcp-email-server/issues/247) changes that
+behavior: an empty list now denies `send_email`, `forward_email`, and
+`save_to_mailbox`. This is a compatibility change in both managed and legacy
+mode. Before upgrading a workflow that relied on unrestricted recipients,
+configure its intended addresses explicitly. No automatic unrestricted fallback
+or wildcard recipient is provided. See
+[recipient-policy troubleshooting](troubleshooting.md#recipient-allowlist-errors).
 
 ## Sender allowlist
 

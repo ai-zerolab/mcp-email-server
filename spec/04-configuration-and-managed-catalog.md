@@ -175,10 +175,14 @@ trimmed, lowercased, empty-filtered, and stably deduplicated. Managed updates an
 legacy composition use the same canonicalizers. The UI presents each allowed
 recipient and sender as an individual add/edit/remove item rather than a
 comma-separated field. Empty collections have deliberately different semantics:
-empty allowed recipients disables sending, while empty allowed senders does not
-restrict reading. Permissive changes do not bypass capability or input
-validation. Restrictive changes take effect on the next independent effect
-because authority is revalidated at operation boundaries.
+an empty allowed-recipient collection denies `send_email`, `forward_email`, and
+`save_to_mailbox` in both managed and legacy mode, while an empty allowed-sender
+collection does not restrict reading. Every To, CC, and BCC address requires an
+exact normalized recipient match; no wildcard or implicit unrestricted mode exists.
+An initially empty recipient policy is rejected before opening a provider,
+including before a forward source is read. Permissive changes do not bypass
+capability or input validation. Restrictive changes take effect on the next
+independent effect because authority is revalidated at operation boundaries.
 
 ## Semantic IMAP Keyword Configuration
 
@@ -356,7 +360,9 @@ SQL, raw provider responses, or reusable locators.
 3. Every account, policy, catalog, import, binding, and bootstrap mutation
    rejects stale revisions with a bounded current summary; account and policy
    cardinality limits are enforced on both read and write boundaries, including
-   the full 1,000-entry recipient and sender policy limit.
+   the full 1,000-entry recipient and sender policy limit. Empty recipient policy
+   denies send, forward, and mailbox saves in both runtime modes, including
+   after policy is cleared between independent provider effects.
 4. Soft removal disables provider work and permanently reserves the normalized
    name in this delivery.
 5. Every finite management command has a tested single-document JSON success
